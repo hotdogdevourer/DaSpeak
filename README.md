@@ -10,7 +10,7 @@ It reads phoneme input and produces a mono WAV speech file.
 
 ## File Names
 
-- Source file: `daspeak.c`
+- Source file: `daspeak.cpp`
 - Compacted version: `daspeak_compacted.cpp`
 
 Use the compacted version if you want faster compilation or cleaner code.
