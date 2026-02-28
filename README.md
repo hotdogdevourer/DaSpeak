@@ -75,6 +75,7 @@ Example:
 
 Rules:
 
+- Phoneme Specs seperated by | (pipe/vertical line)
 - Duration = seconds (0.01 to 2.0)
 - Overlap = seconds (0.0 to 0.5)
 - You can add up to 8 pitch values
