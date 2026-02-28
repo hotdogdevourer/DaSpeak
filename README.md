@@ -70,10 +70,7 @@ PHONEME DURATION OVERLAP PITCH1 PITCH2 ...
 Example:
 
 ```bash
-./daspeak -spec="HH 0.12 0.015 95
-EH 0.14 0.018 105 110
-L 0.10 0.015 100
-OW 0.20 0.02 115 100" -o=output.wav
+./daspeak -spec="HH 0.12 0.015 95|EH 0.14 0.018 105 110|L 0.10 0.015 100|OW 0.20 0.02 115 100" -o=output.wav
 ```
 
 Rules:
