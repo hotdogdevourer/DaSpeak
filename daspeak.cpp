@@ -544,7 +544,7 @@ public:
             noise = lfilter(b, a, noise);
 
             for(int i=0;i<n_samples;i++)
-                noise[i] *= 0.03;   
+                noise[i] *= 0.005;   
         }
         else if (phoneme == "F") {
 
@@ -583,13 +583,12 @@ public:
                                  + 0.5 * std::sin(2 * phase)
                                  + 0.25 * std::sin(3 * phase)) * 0.08;
 
-                noise[i] = noise[i] * 0.7 + voicing * 0.3;
+                noise[i] = noise[i] * 0.01 + voicing * 0.8;
             }
         }
         else if (phoneme == "V") {
-
-            double low = scale_freq(1000);
-            double high = scale_freq(7000);
+            double low = scale_freq(200);    
+            double high = scale_freq(6000);  
 
             design_butterworth(fs, low, "high", 2, b, a);
             noise = lfilter(b, a, noise);
@@ -598,12 +597,24 @@ public:
             noise = lfilter(b, a, noise);
 
             for(int i=0; i<n_samples; ++i) {
-                double phase = 2 * M_PI * f0 * i / fs;
-                double voicing = (std::sin(phase)
-                                 + 0.5 * std::sin(2 * phase)
-                                 + 0.25 * std::sin(3 * phase)) * 0.12;
+                noise[i] *= 4.5;  
+            }
 
-                noise[i] = noise[i] * 0.5 + voicing * 0.5;
+            for(int i=0; i<n_samples; ++i) {
+                double phase = 2 * M_PI * f0 * i / fs;
+
+                double voicing =
+                    0.5 * std::sin(phase)
+                  + 0.25 * std::sin(2*phase)
+                  + 0.15 * std::sin(3*phase);
+
+                noise[i] =
+                    0.001 * noise[i]        
+                  + 0.50 * voicing * 0.35; 
+            }
+
+            for(int i=1; i<n_samples; ++i) {
+                noise[i] = 0.92 * noise[i] + 0.08 * (noise[i] - noise[i-1]) * 2.5;
             }
         }
         else if (phoneme == "DH") {
@@ -623,7 +634,7 @@ public:
                                  + 0.5 * std::sin(2 * phase)
                                  + 0.25 * std::sin(3 * phase)) * 0.15;
 
-                noise[i] = noise[i] * 0.4 + voicing * 0.6;
+                noise[i] = noise[i] * 0.01 + voicing * 1.5;
             }
         }
         else {
@@ -690,6 +701,7 @@ public:
 
     std::vector<double> synthesize_phoneme_direct(const PhonemeSpec& spec) {
         std::string ph = spec.phoneme;
+        static const std::set<std::string> VOICED_FRICATIVES = {"V", "Z", "ZH", "DH"};
         double dur = spec.duration;
         double f1 = spec.f1, f2 = spec.f2, f3 = spec.f3;
         bool voiced = spec.voiced;
@@ -803,7 +815,55 @@ public:
                 for(double& s : source) s *= 0.45;
             }
             output = source;
-        } else {
+        } 
+        else if (VOICED_FRICATIVES.find(ph) != VOICED_FRICATIVES.end()) {
+            
+            std::vector<double> glottal = generate_glottal_pulse_train_contour(dur, spec.pitch_contour);
+            
+            double noise_intensity = 1.5;  
+            if (ph == "V") noise_intensity = 2.0;      
+            else if (ph == "Z" || ph == "ZH") noise_intensity = 1.8;
+            else if (ph == "DH") noise_intensity = 1.3;
+            
+            std::vector<double> friction = generate_shaped_noise(dur, ph, noise_intensity, 
+                                                                 spec.pitch_contour.empty() ? 115.0 : spec.pitch_contour[0]);
+            
+            double noise_weight = 0.85;   
+            double voice_weight = 0.15;   
+            
+            if (ph == "V") { noise_weight = 0.90; voice_weight = 0.10; }  
+            
+            std::vector<double> source(glottal.size());
+            for(size_t i = 0; i < source.size(); ++i) {
+                source[i] = noise_weight * friction[i] + voice_weight * glottal[i];
+            }
+            
+            if (f1 > 50) {
+                output = apply_formants_safe(source, f1, f2, f3);
+            } else {
+                output = source;
+            }
+            
+            int n = output.size();
+            std::vector<double> env(n, 1.0);
+            double att = std::min(0.015, dur * 0.25);
+            double rel = std::min(0.030, dur * 0.40);
+            int att_s = static_cast<int>(att * fs);
+            int rel_s = static_cast<int>(rel * fs);
+            
+            if (att_s > 0) {
+                std::vector<double> ramp = linspace(0, 1, att_s);
+                for(int i=0; i<att_s && i<n; ++i) env[i] = ramp[i];
+            }
+            if (rel_s > 0) {
+                std::vector<double> ramp = linspace(1, 0.05, rel_s);
+                for(int i=0; i<rel_s && (n-1-i)>=0; ++i) env[n-1-i] = ramp[i];
+            }
+            for(int i=0; i<n; ++i) output[i] *= env[i];
+            for(double& o : output) o = std::tanh(o * 1.15) * 0.93;
+            
+        } 
+        else {
             std::vector<double> source = generate_glottal_pulse_train_contour(dur, spec.pitch_contour);
             if (f1 > 50) {
                 output = apply_formants_safe(source, f1, f2, f3);
