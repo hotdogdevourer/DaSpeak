@@ -5,7 +5,6 @@
  * Licensed under the MIT License.
  * See the LICENSE file in the project root for full license information.
  */
- 
 #include <iostream>
 #include <vector>
 #include <string>
@@ -518,7 +517,7 @@ public:
 
             for (double& n : noise) n *= 1.6;
         }
-        else if (phoneme == "SH" || phoneme == "ZH") {
+        else if (phoneme == "SH") {
 
             double low = scale_freq(2500);
             double high = scale_freq(6000);
@@ -531,6 +530,47 @@ public:
 
             for(int i=0;i<n_samples;i++)
                 noise[i] *= 0.07;   
+        }
+        else if (phoneme == "ZH") {
+
+            double low = scale_freq(1800);
+            double high = scale_freq(5000);
+
+            design_butterworth(fs, low, "high", 2, b, a);
+            noise = lfilter(b, a, noise);
+
+            design_butterworth(fs, high, "low", 2, b, a);
+            noise = lfilter(b, a, noise);
+
+            std::vector<double> voiced_source(n_samples);
+
+            for(int i = 0; i < n_samples; ++i) {
+                double phase = 2 * M_PI * f0 * i / fs;
+
+                voiced_source[i] =
+                    0.8 * std::sin(phase) +
+                    0.35 * std::sin(2*phase) +
+                    0.15 * std::sin(3*phase);
+            }
+
+            for(auto& v : voiced_source)
+                v *= 8.8;
+
+            const double noise_weight = 0.72;
+            const double voice_weight  = 0.55;
+
+            for(int i = 0; i < n_samples; ++i) {
+                noise[i] = noise_weight * noise[i]
+                         + voice_weight * voiced_source[i];
+            }
+
+            for(int i = 1; i < n_samples; ++i) {
+                noise[i] = 0.93 * noise[i]
+                         + 0.07 * (noise[i] - noise[i-1]) * 2.2;
+            }
+
+            for(auto& v : noise)
+                v = std::tanh(v * 1.25) * 0.95;
         }
         else if (phoneme == "TH") {
 
@@ -1020,35 +1060,262 @@ std::vector<uint8_t> synthesize_spec_mode(const std::string& text, int sample_ra
 
 int main(int argc, char* argv[]) {
     using namespace DaSpeakSynth;
-    
+
+    if (argc == 1) {
+        std::string voice_name = "Default";
+        double pitch_base = 115.0;
+        int sample_rate = 44100;
+        std::string output_file = "output.wav";
+        double volume_db = 0.0;
+        
+        std::cout << "========================================\n";
+        std::cout << "   DaSpeak Formant Synthesizer\n";
+        std::cout << "   Copyright (c) 2026 hotdogdevourer\n";
+        std::cout << "========================================\n\n";
+        
+        while (true) {
+            std::cout << "\n--- Main Menu ---\n";
+            std::cout << "1. Synthesize phonemes\n";
+            std::cout << "2. Synthesize specifications\n";
+            std::cout << "3. About\n";
+            std::cout << "4. Settings\n";
+            std::cout << "5. Exit\n";
+            std::cout << "> ";
+            
+            std::string choice;
+            std::getline(std::cin, choice);
+            
+            if (choice == "1") {
+                std::cout << "\nEnter space-separated phonemes (e.g., HH EH L OW): ";
+                std::string phon_input;
+                std::getline(std::cin, phon_input);
+                
+                if (phon_input.empty()) {
+                    std::cout << "Error: No phonemes entered.\n";
+                    continue;
+                }
+                
+                std::cout << "Output filename [output.wav]: ";
+                std::string out_file;
+                std::getline(std::cin, out_file);
+                if (out_file.empty()) out_file = output_file;
+                if (out_file.size() < 4 || out_file.substr(out_file.size() - 4) != ".wav") {
+                    out_file += ".wav";
+                }
+                
+                try {
+                    if (!VOICE_REGISTRY.set_current_voice(voice_name)) {
+                        VOICE_REGISTRY.set_current_voice("Default");
+                    }
+                    Voice* voice = VOICE_REGISTRY.current_voice;
+                    FormantSynthesizer synth(voice, sample_rate);
+                    std::vector<std::string> phonemes = parse_phoneme_input(phon_input);
+                    std::vector<PhonemeSpec> specs = phonemes_to_spec(phonemes, voice, pitch_base);
+                    std::vector<double> audio = synth.synthesize_from_specs(specs);
+                    
+                    if (volume_db != 0.0) {
+                        double gain = std::pow(10.0, volume_db / 20.0);
+                        for (double& sample : audio) {
+                            sample *= gain;
+                            sample = std::tanh(sample);
+                        }
+                    }
+                    
+                    std::vector<uint8_t> wav_data = generate_wav_bytes(audio, sample_rate);
+                    std::ofstream outfile(out_file, std::ios::binary);
+                    if (!outfile) {
+                        std::cout << "Error: Cannot open output file '" << out_file << "'\n";
+                        continue;
+                    }
+                    outfile.write(reinterpret_cast<const char*>(wav_data.data()), wav_data.size());
+                    outfile.close();
+                    
+                    std::cout << "Successfully synthesized " << audio.size() << " samples ("
+                              << std::fixed << std::setprecision(2)
+                              << static_cast<double>(audio.size()) / sample_rate << " seconds)\n";
+                    std::cout << "Output written to: " << out_file << "\n";
+                } catch (const std::exception& e) {
+                    std::cout << "Synthesis error: " << e.what() << "\n";
+                }
+            }
+            else if (choice == "2") {
+                std::cout << "\nEnter phoneme specifications (pipe-separated):\n";
+                std::cout << "Format: PHONEME DURATION OVERLAP PITCH...\n";
+                std::cout << "Example: HH 0.12 0.015 95|EH 0.14 0.018 105 110\n";
+                std::cout << "> ";
+                std::string spec_input;
+                std::getline(std::cin, spec_input);
+                
+                if (spec_input.empty()) {
+                    std::cout << "Error: No specifications entered.\n";
+                    continue;
+                }
+                
+                std::cout << "Output filename [output.wav]: ";
+                std::string out_file;
+                std::getline(std::cin, out_file);
+                if (out_file.empty()) out_file = output_file;
+                if (out_file.size() < 4 || out_file.substr(out_file.size() - 4) != ".wav") {
+                    out_file += ".wav";
+                }
+                
+                try {
+                    if (!VOICE_REGISTRY.set_current_voice(voice_name)) {
+                        VOICE_REGISTRY.set_current_voice("Default");
+                    }
+                    Voice* voice = VOICE_REGISTRY.current_voice;
+                    std::vector<PhonemeSpec> specs = parse_phoneme_spec(spec_input, voice, pitch_base);
+                    if (specs.empty()) {
+                        std::cout << "Error: No valid phoneme specifications parsed\n";
+                        continue;
+                    }
+                    FormantSynthesizer synth(voice, sample_rate);
+                    std::vector<double> audio = synth.synthesize_from_specs(specs);
+                    
+                    if (volume_db != 0.0) {
+                        double gain = std::pow(10.0, volume_db / 20.0);
+                        for (double& sample : audio) {
+                            sample *= gain;
+                            sample = std::tanh(sample);
+                        }
+                    }
+                    
+                    std::vector<uint8_t> wav_data = generate_wav_bytes(audio, sample_rate);
+                    std::ofstream outfile(out_file, std::ios::binary);
+                    if (!outfile) {
+                        std::cout << "Error: Cannot open output file '" << out_file << "'\n";
+                        continue;
+                    }
+                    outfile.write(reinterpret_cast<const char*>(wav_data.data()), wav_data.size());
+                    outfile.close();
+                    
+                    std::cout << "Successfully synthesized " << audio.size() << " samples ("
+                              << std::fixed << std::setprecision(2)
+                              << static_cast<double>(audio.size()) / sample_rate << " seconds)\n";
+                    std::cout << "Output written to: " << out_file << "\n";
+                } catch (const std::exception& e) {
+                    std::cout << "Synthesis error: " << e.what() << "\n";
+                }
+            }
+            else if (choice == "3") {
+                std::cout << "\n========================================\n";
+                std::cout << "   DaSpeak Formant Synthesizer\n";
+                std::cout << "========================================\n";
+                std::cout << "Copyright (c) 2026 hotdogdevourer\n";
+                std::cout << "Licensed under the MIT License.\n\n";
+                std::cout << "A formant-based speech synthesizer that\n";
+                std::cout << "generates speech from phoneme sequences.\n\n";
+                std::cout << "Features:\n";
+                std::cout << "  - Formant synthesis with configurable voices\n";
+                std::cout << "  - Support for phoneme and spec modes\n";
+                std::cout << "  - Adjustable pitch, sample rate, and volume\n";
+                std::cout << "  - WAV output format\n";
+                std::cout << "========================================\n";
+            }
+            else if (choice == "4") {
+                std::cout << "\n--- Current Settings ---\n";
+                std::cout << "Voice: " << voice_name << "\n";
+                std::cout << "Pitch Base: " << pitch_base << " Hz\n";
+                std::cout << "Sample Rate: " << sample_rate << " Hz\n";
+                std::cout << "Output File: " << output_file << "\n";
+                std::cout << "Volume: " << volume_db << " dB\n\n";
+                
+                std::cout << "Change settings? (y/n): ";
+                std::string change;
+                std::getline(std::cin, change);
+                
+                if (change == "y" || change == "Y") {
+                    std::cout << "Voice name [Default]: ";
+                    std::string v_name;
+                    std::getline(std::cin, v_name);
+                    if (!v_name.empty()) voice_name = v_name;
+                    
+                    std::cout << "Pitch base (50-500 Hz) [115]: ";
+                    std::string p_str;
+                    std::getline(std::cin, p_str);
+                    if (!p_str.empty()) {
+                        try {
+                            double p = std::stod(p_str);
+                            if (p >= 50.0 && p <= 500.0) pitch_base = p;
+                            else std::cout << "Warning: Pitch outside recommended range.\n";
+                        } catch (...) {
+                            std::cout << "Invalid pitch value.\n";
+                        }
+                    }
+                    
+                    std::cout << "Sample rate (8000-192000 Hz) [44100]: ";
+                    std::string r_str;
+                    std::getline(std::cin, r_str);
+                    if (!r_str.empty()) {
+                        try {
+                            int r = std::stoi(r_str);
+                            if (r >= 8000 && r <= 192000) sample_rate = r;
+                            else std::cout << "Warning: Sample rate outside typical range.\n";
+                        } catch (...) {
+                            std::cout << "Invalid sample rate value.\n";
+                        }
+                    }
+                    
+                    std::cout << "Output filename [output.wav]: ";
+                    std::string o_file;
+                    std::getline(std::cin, o_file);
+                    if (!o_file.empty()) {
+                        output_file = o_file;
+                        if (output_file.size() < 4 || output_file.substr(output_file.size() - 4) != ".wav") {
+                            output_file += ".wav";
+                        }
+                    }
+                    
+                    std::cout << "Volume adjustment in dB [0]: ";
+                    std::string vol_str;
+                    std::getline(std::cin, vol_str);
+                    if (!vol_str.empty()) {
+                        try {
+                            volume_db = std::stod(vol_str);
+                        } catch (...) {
+                            std::cout << "Invalid volume value.\n";
+                        }
+                    }
+                    
+                    std::cout << "Settings updated.\n";
+                }
+            }
+            else if (choice == "5") {
+                std::cout << "\nGoodbye!\n";
+                break;
+            }
+            else {
+                std::cout << "Invalid option. Please enter 1-5.\n";
+            }
+        }
+        
+        return 0;
+    }
+
     std::string spec_input;
     std::string phon_input;
     double volume_db = 0.0;
-    double pitch_base = 115.0;  
+    double pitch_base = 115.0;
     int sample_rate = 44100;
     std::string output_file = "output.wav";
     std::string voice_name = "Default";
     bool show_help = false;
-    
+
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
-        
         if (arg == "-h" || arg == "--help") {
             show_help = true;
             continue;
         }
-        
         if (arg.rfind("-", 0) == 0 && arg.find('=') != std::string::npos) {
             size_t eq_pos = arg.find('=');
             std::string key = arg.substr(0, eq_pos);
             std::string value = arg.substr(eq_pos + 1);
-            
-            if (value.size() >= 2 && 
-                ((value.front() == '"' && value.back() == '"') || 
-                 (value.front() == '\'' && value.back() == '\''))) {
+            if (value.size() >= 2 &&
+                ((value.front() == '"' && value.back() == '"') ||
+                (value.front() == '\'' && value.back() == '\''))) {
                 value = value.substr(1, value.size() - 2);
             }
-            
             if (key == "-spec") {
                 spec_input = value;
             } else if (key == "-phon") {
@@ -1060,11 +1327,11 @@ int main(int argc, char* argv[]) {
                     std::cerr << "Error: Invalid volume value '" << value << "'\n";
                     return 1;
                 }
-            } else if (key == "-p") {  
+            } else if (key == "-p") {
                 try {
                     pitch_base = std::stod(value);
                     if (pitch_base < 50.0 || pitch_base > 500.0) {
-                        std::cerr << "Warning: Pitch " << pitch_base 
+                        std::cerr << "Warning: Pitch " << pitch_base
                                   << " Hz outside recommended range (50-500 Hz)\n";
                     }
                 } catch (...) {
@@ -1075,7 +1342,7 @@ int main(int argc, char* argv[]) {
                 try {
                     sample_rate = std::stoi(value);
                     if (sample_rate < 8000 || sample_rate > 192000) {
-                        std::cerr << "Warning: Sample rate " << sample_rate 
+                        std::cerr << "Warning: Sample rate " << sample_rate
                                   << " Hz is outside typical range (8000-192000)\n";
                     }
                 } catch (...) {
@@ -1084,7 +1351,7 @@ int main(int argc, char* argv[]) {
                 }
             } else if (key == "-o") {
                 output_file = value;
-                if (output_file.size() < 4 || 
+                if (output_file.size() < 4 ||
                     output_file.substr(output_file.size() - 4) != ".wav") {
                     output_file += ".wav";
                 }
@@ -1099,10 +1366,10 @@ int main(int argc, char* argv[]) {
             std::cerr << "Warning: Unexpected argument '" << arg << "'\n";
         }
     }
-    
+
     if (show_help || (spec_input.empty() && phon_input.empty())) {
-        std::cout << "DaSpeak Formant Synthesizer v1.0\n"
-                  << "Usage: " << argv[0] << " [options]\n\n"
+        std::cout << "DaSpeak Formant Synthesizer\n"
+                  << "Usage: " << argv[0] << " [options]\n"
                   << "Options:\n"
                   << "  -spec=\"<text>\"   Phoneme specifications (pipe-separated)\n"
                   << "                     Format: PHONEME DURATION OVERLAP PITCH...\n"
@@ -1115,28 +1382,29 @@ int main(int argc, char* argv[]) {
                   << "  -r=<rate>        Sample rate in Hz (default: 44100)\n"
                   << "  -o=<file>        Output WAV filename (default: output.wav)\n"
                   << "  -voice=<name>    Voice preset name (default: Default)\n"
-                  << "  -h, --help       Show this help message\n\n"
+                  << "  -h, --help       Show this help message\n"
                   << "Note: Either -spec or -phon must be provided.\n"
                   << "      -spec allows fine control over duration, overlap, and pitch contour.\n"
                   << "      -phon uses default timing and pitch for each phoneme.\n";
         return (show_help ? 0 : 1);
     }
-    
+
     if (!spec_input.empty() && !phon_input.empty()) {
         std::cerr << "Error: Cannot specify both -spec and -phon. Choose one.\n";
         return 1;
     }
+
     if (spec_input.empty() && phon_input.empty()) {
         std::cerr << "Error: Must specify either -spec or -phon.\n";
         return 1;
     }
-    
+
     if (!VOICE_REGISTRY.set_current_voice(voice_name)) {
         std::cerr << "Warning: Voice '" << voice_name << "' not found, using Default\n";
         VOICE_REGISTRY.set_current_voice("Default");
     }
+
     Voice* voice = VOICE_REGISTRY.current_voice;
-    
     std::vector<double> audio;
     try {
         if (!spec_input.empty()) {
@@ -1157,12 +1425,12 @@ int main(int argc, char* argv[]) {
         std::cerr << "Synthesis error: " << e.what() << "\n";
         return 1;
     }
-    
+
     if (audio.empty()) {
         std::cerr << "Error: Synthesis produced no audio data\n";
         return 1;
     }
-    
+
     if (volume_db != 0.0) {
         double gain = std::pow(10.0, volume_db / 20.0);
         for (double& sample : audio) {
@@ -1170,9 +1438,8 @@ int main(int argc, char* argv[]) {
             sample = std::tanh(sample);
         }
     }
-    
+
     std::vector<uint8_t> wav_data = generate_wav_bytes(audio, sample_rate);
-    
     std::ofstream outfile(output_file, std::ios::binary);
     if (!outfile) {
         std::cerr << "Error: Cannot open output file '" << output_file << "'\n";
@@ -1180,11 +1447,9 @@ int main(int argc, char* argv[]) {
     }
     outfile.write(reinterpret_cast<const char*>(wav_data.data()), wav_data.size());
     outfile.close();
-    
-    std::cout << "Successfully synthesized " << audio.size() << " samples (" 
-              << std::fixed << std::setprecision(2) 
+    std::cout << "Successfully synthesized " << audio.size() << " samples ("
+              << std::fixed << std::setprecision(2)
               << static_cast<double>(audio.size()) / sample_rate << " seconds)\n"
               << "Output written to: " << output_file << "\n";
-    
     return 0;
 }
