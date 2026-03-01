@@ -1,3 +1,11 @@
+/*
+ * DaSpeak Formant Synthesizer - C++ Implementation
+ * Copyright (c) 2026 hotdogdevourer
+ *
+ * Licensed under the MIT License.
+ * See the LICENSE file in the project root for full license information.
+ */
+
 #include<iostream>
 #include<vector>
 #include<string>
