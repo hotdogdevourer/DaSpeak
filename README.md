@@ -6,6 +6,8 @@ DaSpeak is a simple formant-based speech synthesizer written in C++.
 
 It reads phoneme input and produces a mono WAV speech file.
 
+It also supports **interactive CLI** but i won't get into *detail* what it is or about it.
+
 ---
 
 ## File Names
