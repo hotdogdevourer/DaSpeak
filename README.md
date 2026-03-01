@@ -107,7 +107,7 @@ Change volume:
 ## Output
 
 - Produces **16-bit mono WAV file**
-- Default sample rate is **97000 Hz**
+- Default sample rate is **44100 Hz**
 - Output file default name is **output.wav**
 
 ---
