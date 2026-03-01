@@ -1,11 +1,11 @@
 /*
- * DaSpeak Formant Synthesizer - C Implementation
+ * DaSpeak Formant Synthesizer - C++ Implementation
  * Copyright (c) 2026 hotdogdevourer
  *
  * Licensed under the MIT License.
  * See the LICENSE file in the project root for full license information.
  */
-
+ 
 #include <iostream>
 #include <vector>
 #include <string>
@@ -320,17 +320,17 @@ struct PhonemeSpec {
     bool voiced;
 };
 
-std::vector<PhonemeSpec> parse_phoneme_spec(const std::string& text, Voice* voice) {
+std::vector<PhonemeSpec> parse_phoneme_spec(const std::string& text, Voice* voice, double pitch_base = 115.0) {
     std::vector<PhonemeSpec> specs;
-    std::istringstream iss(text);
-    std::string line;
+    std::string segment;
+    std::stringstream pipe_stream(text);
 
-    while (std::getline(iss, line)) {
-        line.erase(0, line.find_first_not_of(" \t"));
-        line.erase(line.find_last_not_of(" \t") + 1);
-        if (line.empty() || line[0] == '#') continue;
+    while (std::getline(pipe_stream, segment, '|')) {
+        segment.erase(0, segment.find_first_not_of(" \t\r\n"));
+        segment.erase(segment.find_last_not_of(" \t\r\n") + 1);
+        if (segment.empty() || segment[0] == '#') continue;
 
-        std::istringstream line_ss(line);
+        std::istringstream line_ss(segment);
         std::string ph_name;
         line_ss >> ph_name;
         std::transform(ph_name.begin(), ph_name.end(), ph_name.begin(), ::toupper);
@@ -346,7 +346,9 @@ std::vector<PhonemeSpec> parse_phoneme_spec(const std::string& text, Voice* voic
             pitch_points.push_back(p);
         }
 
-        if (pitch_points.empty()) pitch_points.push_back(0.0);
+        if (pitch_points.empty()) {
+            pitch_points.push_back(pitch_base);
+        }
         if (pitch_points.size() > 8) pitch_points.resize(8);
 
         duration = std::max(0.01, std::min(2.0, duration));
@@ -405,12 +407,12 @@ private:
     int fs;
     Voice* voice;
     double nyquist;
-    int ref_fs = 97000;
+    int ref_fs = 44100;
     std::mt19937 rng;
     std::normal_distribution<double> dist;
 
 public:
-    FormantSynthesizer(Voice* v, int sample_rate = 97000) 
+    FormantSynthesizer(Voice* v, int sample_rate = 44100) 
         : fs(sample_rate), voice(v), dist(0.0, 1.0) {
         nyquist = fs / 2.0;
         rng.seed(42);
@@ -497,7 +499,7 @@ public:
         return signal;
     }
 
-    std::vector<double> generate_shaped_noise(double duration, const std::string& phoneme, double intensity = 0.25) {
+    std::vector<double> generate_shaped_noise(double duration, const std::string& phoneme, double intensity = 0.25, double f0 = 115.0) {
         int n_samples = static_cast<int>(duration * fs);
         std::vector<double> noise(n_samples);
         for(int i=0; i<n_samples; ++i) noise[i] = dist(rng);
@@ -505,39 +507,123 @@ public:
         std::vector<double> b, a;
 
         if (phoneme == "S") {
-            double low_f = scale_freq(4000);
-            double high_f = scale_freq(8500);
-            design_butterworth(fs, low_f, "low", 2, b, a);
+            double low_cut  = scale_freq(6500);   
+            double high_cut = scale_freq(12000);  
+
+            design_butterworth(fs, low_cut, "high", 4, b, a);
             noise = lfilter(b, a, noise);
-            design_butterworth(fs, high_f, "high", 2, b, a);
-            design_butterworth(fs, 6500, "low", 2, b, a); 
+
+            design_butterworth(fs, high_cut, "low", 4, b, a);
             noise = lfilter(b, a, noise);
-            for(double& n : noise) n *= 1.3;
-        } 
-        else if (phoneme == "SH" || phoneme == "ZH") {
-            double low_f = scale_freq(2500);
-            double high_f = scale_freq(6000);
-            design_butterworth(fs, high_f, "low", 2, b, a);
-            noise = lfilter(b, a, noise);
+
+            for (double& n : noise) n *= 1.6;
         }
-        else if (phoneme == "F" || phoneme == "TH") {
-            double cutoff_f = scale_freq(3500);
-            design_butterworth(fs, cutoff_f, "low", 2, b, a);
+        else if (phoneme == "SH" || phoneme == "ZH") {
+
+            double low = scale_freq(2500);
+            double high = scale_freq(6000);
+
+            design_butterworth(fs, low, "high", 2, b, a);
             noise = lfilter(b, a, noise);
+
+            design_butterworth(fs, high, "low", 2, b, a);
+            noise = lfilter(b, a, noise);
+
+            for(int i=0;i<n_samples;i++)
+                noise[i] *= 0.07;   
+        }
+        else if (phoneme == "TH") {
+
+            double low = scale_freq(800);
+            double high = scale_freq(4500);
+
+            design_butterworth(fs, low, "high", 2, b, a);
+            noise = lfilter(b, a, noise);
+
+            design_butterworth(fs, high, "low", 2, b, a);
+            noise = lfilter(b, a, noise);
+
+            for(int i=0;i<n_samples;i++)
+                noise[i] *= 0.03;   
+        }
+        else if (phoneme == "F") {
+
+            double low = scale_freq(1000);
+            double high = scale_freq(7000);
+
+            design_butterworth(fs, low, "high", 2, b, a);
+            noise = lfilter(b, a, noise);
+
+            design_butterworth(fs, high, "low", 2, b, a);
+            noise = lfilter(b, a, noise);
+
+            for(int i=0;i<n_samples;i++)
+                noise[i] *= 0.05;   
         }
         else if (phoneme == "HH") {
-            double cutoff_f = scale_freq(2800);
+            double cutoff_f = scale_freq(1800);
             design_butterworth(fs, cutoff_f, "low", 2, b, a);
             noise = lfilter(b, a, noise);
-            for(int i=0; i<n_samples; ++i) noise[i] += dist(rng) * 0.15;
+            for(int i=0; i<n_samples; ++i) noise[i] += dist(rng) * 0.9;
         }
-        else if (phoneme == "V" || phoneme == "DH" || phoneme == "Z") {
-            double cutoff_f = scale_freq(4500);
-            design_butterworth(fs, cutoff_f, "low", 2, b, a);
+        else if (phoneme == "Z") {
+
+            double low = scale_freq(3500);
+            double high = scale_freq(8000);
+
+            design_butterworth(fs, low, "high", 2, b, a);
             noise = lfilter(b, a, noise);
+
+            design_butterworth(fs, high, "low", 2, b, a);
+            noise = lfilter(b, a, noise);
+
             for(int i=0; i<n_samples; ++i) {
-                double voicing = std::sin(2 * M_PI * 120 * i / fs) * 0.15;
-                noise[i] = noise[i] * 0.85 + voicing * 0.15;
+                double phase = 2 * M_PI * f0 * i / fs;
+                double voicing = (std::sin(phase)
+                                 + 0.5 * std::sin(2 * phase)
+                                 + 0.25 * std::sin(3 * phase)) * 0.08;
+
+                noise[i] = noise[i] * 0.7 + voicing * 0.3;
+            }
+        }
+        else if (phoneme == "V") {
+
+            double low = scale_freq(1000);
+            double high = scale_freq(7000);
+
+            design_butterworth(fs, low, "high", 2, b, a);
+            noise = lfilter(b, a, noise);
+
+            design_butterworth(fs, high, "low", 2, b, a);
+            noise = lfilter(b, a, noise);
+
+            for(int i=0; i<n_samples; ++i) {
+                double phase = 2 * M_PI * f0 * i / fs;
+                double voicing = (std::sin(phase)
+                                 + 0.5 * std::sin(2 * phase)
+                                 + 0.25 * std::sin(3 * phase)) * 0.12;
+
+                noise[i] = noise[i] * 0.5 + voicing * 0.5;
+            }
+        }
+        else if (phoneme == "DH") {
+
+            double low = scale_freq(800);
+            double high = scale_freq(4500);
+
+            design_butterworth(fs, low, "high", 2, b, a);
+            noise = lfilter(b, a, noise);
+
+            design_butterworth(fs, high, "low", 2, b, a);
+            noise = lfilter(b, a, noise);
+
+            for(int i=0; i<n_samples; ++i) {
+                double phase = 2 * M_PI * f0 * i / fs;
+                double voicing = (std::sin(phase)
+                                 + 0.5 * std::sin(2 * phase)
+                                 + 0.25 * std::sin(3 * phase)) * 0.15;
+
+                noise[i] = noise[i] * 0.4 + voicing * 0.6;
             }
         }
         else {
@@ -615,27 +701,87 @@ public:
         if (STOPS.find(ph) != STOPS.end()) {
             int n_samples = static_cast<int>(dur * fs);
             std::vector<double> out(n_samples, 0.0);
-            int closure_end = static_cast<int>(n_samples * 0.82);
+
+            int closure_end = static_cast<int>(n_samples * 0.80);
+            for (int i = 0; i < closure_end; ++i) {
+                out[i] = dist(rng) * 0.002;
+            }
             int burst_start = closure_end;
             int burst_len = std::min(200, n_samples - burst_start);
 
             if (burst_len > 30) {
                 std::vector<double> burst_noise(burst_len);
-                for(int i=0; i<burst_len; ++i) burst_noise[i] = dist(rng);
-                
-                if (f1 > 50) {
-                    burst_noise = apply_formants_safe(burst_noise, f1, f2, f3);
+                for(int i=0; i<burst_len; ++i)
+                    burst_noise[i] = dist(rng);
+
+                double low = 1000, high = 4000;
+
+                if (ph == "P" || ph == "B") {
+                    low = 500;  high = 1500;
+                }
+                else if (ph == "T" || ph == "D") {
+                    low = 3000; high = 5000;
+                }
+                else if (ph == "K" || ph == "G") {
+                    low = 1500; high = 3000;
+                }
+                else if (ph == "CH") {
+                    low = 3000; high = 6000;
                 }
 
-                std::vector<double> hanning = linspace(0, M_PI, burst_len);
-                for(int i=0; i<burst_len; ++i) burst_noise[i] *= std::sin(hanning[i]) * 0.6;
+                std::vector<double> b,a;
 
-                for(int i=0; i<burst_len; ++i) {
-                    if(burst_start + i < n_samples) out[burst_start + i] += burst_noise[i];
+                design_butterworth(fs, scale_freq(low), "high", 2, b, a);
+                burst_noise = lfilter(b, a, burst_noise);
+
+                design_butterworth(fs, scale_freq(high), "low", 2, b, a);
+                burst_noise = lfilter(b, a, burst_noise);
+
+                for(int i=0;i<burst_len;i++) {
+                    double decay = std::exp(-6.0 * i / burst_len);
+                    burst_noise[i] *= decay * 0.5;
+                }
+
+                for(int i=0;i<burst_len;i++)
+                    out[burst_start + i] += burst_noise[i];
+            }
+                        
+            bool is_voiced_stop = (ph == "B" || ph == "D" || ph == "G");
+
+            if (is_voiced_stop) {
+
+                int prevoice_len = std::min(closure_end, n_samples / 3);
+
+                for(int i = 0; i < prevoice_len; ++i) {
+                    double phase = 2 * M_PI * 100.0 * i / fs;
+                    double voicing = std::sin(phase) * 0.25;   
+                    out[i] += voicing;
+                }
+
+                int voice_start = burst_start + burst_len;
+                int ramp_len = std::min(400, n_samples - voice_start);
+
+                for(int i = 0; i < ramp_len; ++i) {
+                    double phase = 2 * M_PI * 120.0 * i / fs;
+                    double glottal = std::sin(phase) * 0.35;  
+                    double fade = i / static_cast<double>(ramp_len);
+                    out[voice_start + i] += glottal * fade;
+                }
+            }
+            
+            bool is_voiceless = (ph == "P" || ph == "T" || ph == "K" || ph == "CH");
+
+            if (is_voiceless) {
+                int asp_len = std::min(400, n_samples - (burst_start + burst_len));
+                for(int i=0;i<asp_len;i++) {
+                    double noise = dist(rng) * 0.2;
+                    double decay = std::exp(-3.0 * i / asp_len);
+                    out[burst_start + burst_len + i] += noise * decay;
                 }
             }
 
-            for(double& o : out) o *= 0.85;
+            if (!is_voiced_stop)
+                for(double& o : out) o *= 0.85;
             return out;
         }
 
@@ -646,7 +792,7 @@ public:
             else if (ph == "SH") intensity = 0.64;
             else if (ph == "F" || ph == "TH") intensity = 0.32;
 
-            std::vector<double> source = generate_shaped_noise(dur, ph, intensity);
+            std::vector<double> source = generate_shaped_noise(dur, ph, intensity, spec.pitch_contour.empty() ? 115.0 : spec.pitch_contour[0]);
             if (f1 > 50) {
                 if (ph == "S" || ph == "SH") {
                     source = apply_formants_safe(source, f1*0.7, f2*0.7, f3*0.7);
@@ -793,7 +939,7 @@ std::vector<uint8_t> generate_wav_bytes(const std::vector<double>& audio, int sr
     return buffer;
 }
 
-std::vector<uint8_t> synthesize_phoneme_mode(const std::string& text, int sample_rate = 97000, Voice* voice = nullptr) {
+std::vector<uint8_t> synthesize_phoneme_mode(const std::string& text, int sample_rate = 44100, Voice* voice = nullptr) {
     if (!voice) voice = VOICE_REGISTRY.current_voice;
     std::vector<std::string> phonemes = parse_phoneme_input(text);
     std::vector<PhonemeSpec> specs = phonemes_to_spec(phonemes, voice);
@@ -802,7 +948,7 @@ std::vector<uint8_t> synthesize_phoneme_mode(const std::string& text, int sample
     return generate_wav_bytes(audio, sample_rate);
 }
 
-std::vector<uint8_t> synthesize_spec_mode(const std::string& text, int sample_rate = 97000, Voice* voice = nullptr) {
+std::vector<uint8_t> synthesize_spec_mode(const std::string& text, int sample_rate = 44100, Voice* voice = nullptr) {
     if (!voice) voice = VOICE_REGISTRY.current_voice;
     std::vector<PhonemeSpec> specs = parse_phoneme_spec(text, voice);
     FormantSynthesizer synth(voice, sample_rate);
@@ -815,10 +961,10 @@ std::vector<uint8_t> synthesize_spec_mode(const std::string& text, int sample_ra
 int main(int argc, char* argv[]) {
     using namespace DaSpeakSynth;
     
-    // Default parameters
     std::string spec_input;
     std::string phon_input;
     double volume_db = 0.0;
+    double pitch_base = 115.0;  
     int sample_rate = 44100;
     std::string output_file = "output.wav";
     std::string voice_name = "Default";
@@ -852,6 +998,17 @@ int main(int argc, char* argv[]) {
                     volume_db = std::stod(value);
                 } catch (...) {
                     std::cerr << "Error: Invalid volume value '" << value << "'\n";
+                    return 1;
+                }
+            } else if (key == "-p") {  
+                try {
+                    pitch_base = std::stod(value);
+                    if (pitch_base < 50.0 || pitch_base > 500.0) {
+                        std::cerr << "Warning: Pitch " << pitch_base 
+                                  << " Hz outside recommended range (50-500 Hz)\n";
+                    }
+                } catch (...) {
+                    std::cerr << "Error: Invalid pitch value '" << value << "'\n";
                     return 1;
                 }
             } else if (key == "-r") {
@@ -892,8 +1049,10 @@ int main(int argc, char* argv[]) {
                   << "                     Example: \"HH 0.12 0.015 95|EH 0.14 0.018 105 110\"\n"
                   << "  -phon=\"<text>\"   Space-separated phoneme names\n"
                   << "                     Example: \"HH EH L OW\"\n"
+                  << "  -p=<Hz>          Base pitch frequency in Hz (default: 115)\n"
+                  << "                     Used for -phon mode; fallback for -spec if pitch omitted\n"
                   << "  -v=<dB>          Volume adjustment in decibels (default: 0)\n"
-                  << "  -r=<rate>        Sample rate in Hz (default: 97000)\n"
+                  << "  -r=<rate>        Sample rate in Hz (default: 44100)\n"
                   << "  -o=<file>        Output WAV filename (default: output.wav)\n"
                   << "  -voice=<name>    Voice preset name (default: Default)\n"
                   << "  -h, --help       Show this help message\n\n"
@@ -921,7 +1080,7 @@ int main(int argc, char* argv[]) {
     std::vector<double> audio;
     try {
         if (!spec_input.empty()) {
-            std::vector<PhonemeSpec> specs = parse_phoneme_spec(spec_input, voice);
+            std::vector<PhonemeSpec> specs = parse_phoneme_spec(spec_input, voice, pitch_base);
             if (specs.empty()) {
                 std::cerr << "Error: No valid phoneme specifications parsed\n";
                 return 1;
@@ -931,7 +1090,7 @@ int main(int argc, char* argv[]) {
         } else {
             FormantSynthesizer synth(voice, sample_rate);
             std::vector<std::string> phonemes = parse_phoneme_input(phon_input);
-            std::vector<PhonemeSpec> specs = phonemes_to_spec(phonemes, voice);
+            std::vector<PhonemeSpec> specs = phonemes_to_spec(phonemes, voice, pitch_base);
             audio = synth.synthesize_from_specs(specs);
         }
     } catch (const std::exception& e) {
