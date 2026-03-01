@@ -97,19 +97,19 @@ Interactive mode opens when no arguments are provided.
 Generate speech:
 
 ```bash
-./daspeak -phon="S AH N D" -o=sound.wav
+./daspeak -phon="S AH OW N D" -o=sound.wav
 ```
 
 Change sample rate:
 
 ```bash
-./daspeak -phon="IY Z IY" -r=96000 -o=high.wav
+./daspeak -phon="IY Z IY SIL HH AA EY" -r=96000 -o=high.wav
 ```
 
 Change volume:
 
 ```bash
-./daspeak -phon="HH AE P IY" -v=6 -o=loud.wav
+./daspeak -phon="HH AE P IY SIL L AA OW D" -v=41 -o=loud.wav
 ```
 
 ---
