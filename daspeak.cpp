@@ -181,6 +181,24 @@ struct PhonemeData {
     bool is_silence = false;
 };
 
+int parse_stress_level(std::string& phoneme) {
+    int stress = 1;
+    if (phoneme.length() > 1) {
+        char last = phoneme.back();
+        if (last >= '0' && last <= '2') {
+            stress = last - '0';
+            phoneme.pop_back();
+        }
+    }
+    return stress;
+}
+
+bool isValidPhonemeWithStress(const std::string& token) {
+    std::string base = token;
+    parse_stress_level(base);
+    return VALID_PHONEMES.find(base) != VALID_PHONEMES.end();
+}
+
 class Voice {
 public:
     std::string name;
@@ -191,19 +209,18 @@ public:
 
     PhonemeData get_phoneme_data(const std::string& phoneme) {
         std::string base_ph = phoneme;
+        int stress = parse_stress_level(base_ph); 
         bool is_final = false;
         if (base_ph.size() > 6 && base_ph.substr(base_ph.size() - 6) == "_FINAL") {
             base_ph = base_ph.substr(0, base_ph.size() - 6);
             is_final = true;
         }
-
         auto it = phonemes.find(base_ph);
         if (it == phonemes.end()) {
             auto sil_it = phonemes.find("SIL");
             if (sil_it != phonemes.end()) return sil_it->second;
             return PhonemeData();
         }
-
         PhonemeData data = it->second;
         if (is_final && VOWELS.find(base_ph) != VOWELS.end()) {
             data.length = std::min(data.length * 1.4, 0.35);
@@ -244,9 +261,9 @@ public:
         add("Y",  350, 2050, 2650, 115, 0.12, true);
         add("JH", 400, 1650, 2450, 115, 0.12, true);
         
-        add("B",  0, 0, 0, 0, 0.068, false);
-        add("D",  0, 0, 0, 0, 0.068, false);
-        add("G",  0, 0, 0, 0, 0.068, false);
+        add("B",  350, 1050, 2250, 0, 0.068, true);  
+        add("D",  320, 1150, 2450, 0, 0.068, true);  
+        add("G",  280, 950, 2350, 0, 0.068, true);   
         add("P",  0, 0, 0, 0, 0.068, false);
         add("T",  0, 0, 0, 0, 0.068, false);
         add("K",  0, 0, 0, 0, 0.068, false);
@@ -293,20 +310,17 @@ std::vector<std::string> parse_phoneme_input(const std::string& text) {
     std::vector<std::string> phonemes;
     std::istringstream iss(text);
     std::string token;
-    
     while (iss >> token) {
         std::transform(token.begin(), token.end(), token.begin(), ::toupper);
-        if (VALID_PHONEMES.find(token) != VALID_PHONEMES.end()) {
+        if (isValidPhonemeWithStress(token)) {
             phonemes.push_back(token);
         } else {
             phonemes.push_back("SIL");
         }
     }
-
     if (phonemes.empty()) return {"SIL", "SIL"};
     if (phonemes.front() != "SIL") phonemes.insert(phonemes.begin(), "SIL");
     if (phonemes.back() != "SIL") phonemes.push_back("SIL");
-
     return phonemes;
 }
 
@@ -317,50 +331,49 @@ struct PhonemeSpec {
     std::vector<double> pitch_contour;
     double f1, f2, f3;
     bool voiced;
+    int stress_level = 1;
+    double burst_intensity = 0.65; 
 };
 
 std::vector<PhonemeSpec> parse_phoneme_spec(const std::string& text, Voice* voice, double pitch_base = 115.0) {
     std::vector<PhonemeSpec> specs;
     std::string segment;
     std::stringstream pipe_stream(text);
-
     while (std::getline(pipe_stream, segment, '|')) {
         segment.erase(0, segment.find_first_not_of(" \t\r\n"));
         segment.erase(segment.find_last_not_of(" \t\r\n") + 1);
         if (segment.empty() || segment[0] == '#') continue;
-
         std::istringstream line_ss(segment);
         std::string ph_name;
         line_ss >> ph_name;
         std::transform(ph_name.begin(), ph_name.end(), ph_name.begin(), ::toupper);
-
-        if (VALID_PHONEMES.find(ph_name) == VALID_PHONEMES.end()) continue;
+        
+        if (!isValidPhonemeWithStress(ph_name)) continue;
 
         double duration, overlap;
         line_ss >> duration >> overlap;
-        
         std::vector<double> pitch_points;
         double p;
         while (line_ss >> p) {
             pitch_points.push_back(p);
         }
-
         if (pitch_points.empty()) {
             pitch_points.push_back(pitch_base);
         }
         if (pitch_points.size() > 8) pitch_points.resize(8);
-
         duration = std::max(0.01, std::min(2.0, duration));
         overlap = std::max(0.0, std::min(0.5, overlap));
-
-        PhonemeData ph_data = voice->get_phoneme_data(ph_name);
         
-        std::set<std::string> unvoiced_set = {"SIL", "B", "D", "G", "P", "T", "K", "F", "S", "SH", "TH", "HH", "CH"};
+        PhonemeData ph_data = voice->get_phoneme_data(ph_name);
+        std::set<std::string> unvoiced_set = {"SIL", "P", "T", "K", "F", "S", "SH", "TH", "HH", "CH"};
         bool is_voiced = (unvoiced_set.find(ph_name) == unvoiced_set.end());
+        
+        std::string base_ph = ph_name;
+        int stress = parse_stress_level(base_ph);
 
         specs.push_back({
             ph_name, duration, overlap, pitch_points,
-            ph_data.f1, ph_data.f2, ph_data.f3, is_voiced
+            ph_data.f1, ph_data.f2, ph_data.f3, is_voiced, stress
         });
     }
     return specs;
@@ -369,33 +382,56 @@ std::vector<PhonemeSpec> parse_phoneme_spec(const std::string& text, Voice* voic
 std::vector<PhonemeSpec> phonemes_to_spec(const std::vector<std::string>& phonemes, Voice* voice, double pitch_base = 115.0) {
     std::vector<PhonemeSpec> specs;
     std::set<std::string> unvoiced_set = {"SIL", "B", "D", "G", "P", "T", "K", "F", "S", "SH", "TH", "HH", "CH"};
-
     for (size_t i = 0; i < phonemes.size(); ++i) {
-        const std::string& ph = phonemes[i];
+        std::string ph = phonemes[i];
+        std::string base_ph = ph;
+        int stress = parse_stress_level(base_ph); 
+
         PhonemeData ph_data = voice->get_phoneme_data(ph);
         double duration = ph_data.length;
-        double overlap = (VOWELS.find(ph) != VOWELS.end() && i < phonemes.size() - 1) ? 0.050 : 0.025;
+        
+        if (stress == 1) duration *= 1.30;      
+        else if (stress == 2) duration *= 1.10; 
+        else if (stress == 0) duration *= 0.80; 
 
+        double overlap = (VOWELS.find(base_ph) != VOWELS.end() && i < phonemes.size() - 1) ? 0.050 : 0.025;
         std::vector<double> pitch;
+        
         if (ph == "SIL") {
             pitch = {0.0};
-        } else if (VOWELS.find(ph) != VOWELS.end()) {
+        } else if (VOWELS.find(base_ph) != VOWELS.end()) {
+            double p_base = pitch_base;
+            if (stress == 1) p_base *= 1.10;    
+            else if (stress == 0) p_base *= 0.95; 
+            
             if (i == phonemes.size() - 2) {
-                pitch = {pitch_base * 0.95, pitch_base * 0.90};
+                pitch = {p_base * 0.95, p_base * 0.90};
             } else if (i == 1) {
-                pitch = {pitch_base * 1.05, pitch_base * 1.10};
+                pitch = {p_base * 1.05, p_base * 1.10};
             } else {
-                pitch = {pitch_base};
+                pitch = {p_base};
             }
         } else {
             pitch = {ph_data.voiced ? pitch_base : 0.0};
         }
-
         bool is_voiced = (unvoiced_set.find(ph) == unvoiced_set.end());
-
+        if (STOPS.find(base_ph) != STOPS.end()) {
+            double burst = 0.65;
+            bool is_voiced_stop = (ph == "B" || ph == "D" || ph == "G");
+            
+            if (i == phonemes.size() - 2) burst = 0.30;
+            if (stress == 0) burst = 0.40;
+            if (ph == "P" || ph == "T" || ph == "K") burst *= 1.2;
+            if (is_voiced_stop) burst *= 0.7;
+            
+            specs.push_back({
+                ph, duration, overlap, pitch,
+                ph_data.f1, ph_data.f2, ph_data.f3, is_voiced, stress, burst
+            });
+        }
         specs.push_back({
             ph, duration, overlap, pitch,
-            ph_data.f1, ph_data.f2, ph_data.f3, is_voiced
+            ph_data.f1, ph_data.f2, ph_data.f3, is_voiced, stress
         });
     }
     return specs;
@@ -753,87 +789,117 @@ public:
         if (STOPS.find(ph) != STOPS.end()) {
             int n_samples = static_cast<int>(dur * fs);
             std::vector<double> out(n_samples, 0.0);
-
-            int closure_end = static_cast<int>(n_samples * 0.80);
+            
+            double burst_intensity = 0.65; 
+            if (ph == "P" || ph == "T" || ph == "K") burst_intensity = 0.75; 
+            if (ph == "B" || ph == "D" || ph == "G") burst_intensity = 0.50; 
+            
+            int closure_end = static_cast<int>(n_samples * 0.70); 
             for (int i = 0; i < closure_end; ++i) {
-                out[i] = dist(rng) * 0.002;
+                out[i] = dist(rng) * 0.0005;
             }
+            
             int burst_start = closure_end;
-            int burst_len = std::min(200, n_samples - burst_start);
-
-            if (burst_len > 30) {
+            int burst_len = std::min(300, n_samples - burst_start); 
+            if (burst_len > 50 && burst_intensity > 0.1) {
                 std::vector<double> burst_noise(burst_len);
-                for(int i=0; i<burst_len; ++i)
+                
+                for(int i = 0; i < burst_len; ++i) {
                     burst_noise[i] = dist(rng);
-
+                }
+                
                 double low = 1000, high = 4000;
-
                 if (ph == "P" || ph == "B") {
-                    low = 500;  high = 1500;
+                    low = 400;  high = 1200;  
                 }
                 else if (ph == "T" || ph == "D") {
-                    low = 3000; high = 5000;
+                    low = 2500; high = 5500;  
                 }
                 else if (ph == "K" || ph == "G") {
-                    low = 1500; high = 3000;
+                    low = 1200; high = 3500;  
                 }
                 else if (ph == "CH") {
-                    low = 3000; high = 6000;
+                    low = 2800; high = 6500;  
                 }
-
-                std::vector<double> b,a;
-
+                
+                std::vector<double> b, a;
                 design_butterworth(fs, scale_freq(low), "high", 2, b, a);
                 burst_noise = lfilter(b, a, burst_noise);
-
-                design_butterworth(fs, scale_freq(high), "low", 2, b, a);
+                design_butterworth(fs, scale_freq(high), "low", 3, b, a); 
                 burst_noise = lfilter(b, a, burst_noise);
-
-                for(int i=0;i<burst_len;i++) {
-                    double decay = std::exp(-6.0 * i / burst_len);
-                    burst_noise[i] *= decay * 0.5;
+                
+                for(int i = 0; i < burst_len; i++) {
+                    double decay = std::exp(-8.0 * i / burst_len); 
+                    double random_var = 0.85 + (dist(rng) * 0.3); 
+                    burst_noise[i] *= decay * burst_intensity * random_var * 0.4;
                 }
-
-                for(int i=0;i<burst_len;i++)
-                    out[burst_start + i] += burst_noise[i];
+                
+                for(int i = 0; i < burst_len; i++) {
+                    if (burst_start + i < n_samples) {
+                        out[burst_start + i] += burst_noise[i];
+                    }
+                }
             }
-                        
+            
             bool is_voiced_stop = (ph == "B" || ph == "D" || ph == "G");
+            int voice_start = burst_start + static_cast<int>(burst_len * 0.5);
 
             if (is_voiced_stop) {
-
-                int prevoice_len = std::min(closure_end, n_samples / 3);
-
+                int prevoice_len = std::min(closure_end, static_cast<int>(n_samples * 0.40));
+                int prevoice_start = closure_end - prevoice_len;
                 for(int i = 0; i < prevoice_len; ++i) {
                     double phase = 2 * M_PI * 100.0 * i / fs;
-                    double voicing = std::sin(phase) * 0.25;   
-                    out[i] += voicing;
+                    double glottal_pulse = -0.5 * (1 - std::cos(phase));
+                    double fade_in = std::min(1.0, i / static_cast<double>(prevoice_len * 0.25));
+                    out[prevoice_start + i] += glottal_pulse * fade_in * 0.45;  
                 }
-
-                int voice_start = burst_start + burst_len;
-                int ramp_len = std::min(400, n_samples - voice_start);
-
+                
+                int ramp_len = std::min(500, n_samples - voice_start);
                 for(int i = 0; i < ramp_len; ++i) {
                     double phase = 2 * M_PI * 120.0 * i / fs;
-                    double glottal = std::sin(phase) * 0.35;  
-                    double fade = i / static_cast<double>(ramp_len);
-                    out[voice_start + i] += glottal * fade;
+                    double glottal = -0.5 * (1 - std::cos(phase));
+                    double fade = 1.0 / (1.0 + std::exp(-0.04 * i));  
+                    out[voice_start + i] += glottal * fade * 0.50;  
+                }
+                
+                int voice_continue_start = voice_start + ramp_len;
+                for(int i = voice_continue_start; i < n_samples; ++i) {
+                    double phase = 2 * M_PI * 120.0 * i / fs;
+                    double glottal = -0.5 * (1 - std::cos(phase));
+                    double fade_out = 1.0 - (0.3 * (i - voice_continue_start) / (n_samples - voice_continue_start + 1));
+                    out[i] += glottal * fade_out * 0.45;
+                }
+            }
+
+            if (is_voiced_stop && f1 > 50) {
+                int voice_portion_start = voice_start;
+                int voice_portion_len = n_samples - voice_portion_start;
+                if (voice_portion_len > 100) {
+                    std::vector<double> voice_portion(out.begin() + voice_portion_start, out.end());
+                    voice_portion = apply_formants_safe(voice_portion, f1 * 0.85, f2 * 0.85, f3);
+                    for(int i = 0; i < voice_portion_len && voice_portion_start + i < n_samples; i++) {
+                        out[voice_portion_start + i] = voice_portion[i];
+                    }
                 }
             }
             
             bool is_voiceless = (ph == "P" || ph == "T" || ph == "K" || ph == "CH");
-
             if (is_voiceless) {
-                int asp_len = std::min(400, n_samples - (burst_start + burst_len));
-                for(int i=0;i<asp_len;i++) {
-                    double noise = dist(rng) * 0.2;
-                    double decay = std::exp(-3.0 * i / asp_len);
-                    out[burst_start + burst_len + i] += noise * decay;
+                int asp_start = burst_start + burst_len;
+                int asp_len = std::min(600, n_samples - asp_start); 
+                
+                for(int i = 0; i < asp_len; i++) {
+                    double noise = dist(rng);
+                    double decay = std::exp(-4.0 * i / asp_len);
+                    
+                    if (i % 3 == 0) noise *= 0.5; 
+                    
+                    out[asp_start + i] += noise * decay * 0.15;
                 }
             }
-
-            if (!is_voiced_stop)
-                for(double& o : out) o *= 0.85;
+            
+            for(double& o : out) o *= 0.75;
+            
             return out;
         }
 
