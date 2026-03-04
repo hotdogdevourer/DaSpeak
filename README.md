@@ -10,12 +10,7 @@ It also supports **interactive CLI**.
 
 ---
 
-## File Names
-
-- Source file: `daspeak.cpp`
-- Compacted version: `daspeak_compacted.cpp`
-
-Use the compacted version if you want faster compilation or cleaner code.
+Use the compacted version if you want faster compilation or cleaner (but less readable) code.
 
 ---
 
@@ -26,14 +21,18 @@ Make sure you have **g++** installed.
 ### Compile the compacted version (recommended)
 
 ```bash
-g++ -std=c++17 -O3 -s daspeak_compacted.cpp -o daspeak
+g++ -std=c++17 -O3 -s vN_daspeak_compacted.cpp -o daspeak
 ```
+
+Replace "N" with the version number
 
 ### Compile the original version
 
 ```bash
-g++ -std=c++17 -O3 -s daspeak.cpp -o daspeak
+g++ -std=c++17 -O3 -s vN_daspeak.cpp -o daspeak
 ```
+
+Replace "N" with the version number
 
 ---
 
@@ -48,8 +47,10 @@ Just list phonemes separated by spaces.
 Example:
 
 ```bash
-./daspeak -phon="HH EH L OW" -o=hello.wav
+./vN_daspeak -phon="HH EH L OW" -o=hello.wav
 ```
+
+Replace "N" with the version number
 
 This will generate:
 
@@ -72,8 +73,10 @@ PHONEME DURATION OVERLAP PITCH1 PITCH2 ...
 Example:
 
 ```bash
-./daspeak -spec="HH 0.12 0.015 95|EH 0.14 0.018 105 110|L 0.10 0.015 100|OW 0.20 0.02 115 100" -o=output.wav
+./vN_daspeak -spec="HH 0.12 0.015 95|EH 0.14 0.018 105 110|L 0.10 0.015 100|OW 0.20 0.02 115 100" -o=output.wav
 ```
+
+Replace "N" with the version number
 
 Rules:
 
@@ -89,28 +92,32 @@ Rules:
 Interactive mode:
 
 ```bash
-./daspeak
+./vNdaspeak
 ```
+
+Replace "N" with the version number (Only versions 3-5 have interactive mode)
 
 Interactive mode opens when no arguments are provided.
 
 Generate speech:
 
 ```bash
-./daspeak -phon="S AH OW N D" -o=sound.wav
+./vN_daspeak -phon="S AH OW N D" -o=sound.wav
 ```
 
 Change sample rate:
 
 ```bash
-./daspeak -phon="IY Z IY SIL HH AA EY" -r=96000 -o=high.wav
+./vN_daspeak -phon="IY Z IY SIL HH AA EY" -r=96000 -o=high.wav
 ```
 
 Change volume:
 
 ```bash
-./daspeak -phon="HH AE P IY SIL L AA OW D" -v=41 -o=loud.wav
+./vN_daspeak -phon="HH AE P IY SIL L AA OW D" -v=41 -o=loud.wav
 ```
+
+Replace "N" with the version number
 
 ---
 
@@ -127,8 +134,10 @@ Change volume:
 Run:
 
 ```bash
-./daspeak -h
+./vN_daspeak -h
 ```
+
+Replace "N" with the version number
 
 ---
 
