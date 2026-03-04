@@ -92,7 +92,7 @@ Rules:
 Interactive mode:
 
 ```bash
-./vNdaspeak
+./vN_daspeak
 ```
 
 Replace "N" with the version number (Only versions 3-5 have interactive mode)
