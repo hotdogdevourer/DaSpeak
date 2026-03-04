@@ -95,7 +95,7 @@ Interactive mode:
 ./vN_daspeak
 ```
 
-Replace "N" with the version number (Only versions 3-5 have interactive mode)
+Replace "N" with the version number (Only versions 4-5 have interactive mode)
 
 Interactive mode opens when no arguments are provided.
 
