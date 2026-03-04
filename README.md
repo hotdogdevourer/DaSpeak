@@ -136,7 +136,8 @@ Run:
 
 - Only use phonemes listed in the code.
 - If input is invalid, silence is inserted.
-- This is a research-style synthesizer, not production TTS.
+- This is a research-style synthesizer, not production TTS. But you can use it for fun!
+- There is a legacy build but i won't get into detail.
 
 ---
 
